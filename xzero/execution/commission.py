@@ -75,9 +75,9 @@ class Commission:
         self.cost = round(float(cost) / 10 ** self.rounding, 6)
         self.min_cost = round(float(min_cost), 2)
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, keywords=None, **kwargs):
 
-        cls.keywords = kwargs.pop('keywords', None)
+        cls.keywords = keywords
         cls.rounding = kwargs.pop('rounding', 0)
         super().__init_subclass__(**kwargs)
 
@@ -97,7 +97,8 @@ class Commission:
             transaction: filled order
 
         Returns:
-            TransCost: (per share commission, total transaction commission)
+            Total costs
+            Wrapper will calcualte total costs and costs in terms of bps
         """
         raise NotImplementedError('Should implement calculate()')
 
@@ -132,4 +133,4 @@ if __name__ == '__main__':
         python -m xzero.execution.commission all
     """
     import xdoctest
-    xdoctest.doctest_module()
+    xdoctest.doctest_module(__file__)
