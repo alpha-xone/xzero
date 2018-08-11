@@ -25,10 +25,10 @@ class ExecutionEvent(Event, event_type=EventType.EXECUTION):
             >>> res = 'ExecutionEvent(strategy=Growth, ticker=AAPL, '
             >>> res += 'timestamp=2018-07-05 00:00:00, quantity=100, side=1)'
             >>> assert str(ex) == res
-
+            >>>
             >>> signal = SignalEvent(**info_dict)
             >>> assert str(signal) == res.replace('ExecutionEvent', 'SignalEvent')
-
+            >>>
             >>> fill = FillEvent(fill_cost=185.4, **info_dict)
             >>> res = res[:-1] + ', fill_cost=185.4)'
             >>> assert str(fill) == res.replace('ExecutionEvent', 'FillEvent')
