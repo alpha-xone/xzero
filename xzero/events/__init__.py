@@ -12,6 +12,7 @@ class EventType(Enum):
     MKT_ORDER = auto()
     LMT_ORDER = auto()
     FILL = auto()
+    TRANSACTION = auto()
 
 
 class Event(ZeroBase):
@@ -23,6 +24,7 @@ class Event(ZeroBase):
         >>> assert str(event) == 'Event()'
     """
     def __init_subclass__(cls, event_type=None, **kwargs):
+
         cls.event_type = event_type
         super().__init_subclass__(**kwargs)
 
