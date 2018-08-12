@@ -33,7 +33,7 @@ class Transaction(Event, event_type=EventType.TRANSACTION):
         self.comm_in_bps = self._comms_.in_bps
 
         self._logger_.info(
-            f'portfolio={port_name}:ticker={self.ticker}:'
-            f'cost={self.price}:total_notional={self.total_notional}:'
+            f'portfolio={port_name}:ticker={self.ticker}:quantity={quantity}:'
+            f'cost={self.price}:lot_size={self.lot_size}:total_notional={self.total_notional}:'
             f'comms={self.comm_total}:in_bps={self.comm_in_bps}'
         )
