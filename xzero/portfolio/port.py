@@ -29,19 +29,19 @@ class SubPortfolio(ZeroBase):
         """
         Long and short exposures
         """
-        long, short = 0., 0.
+        lng, sht = 0., 0.
         for asset in self.positions.values():
-            if asset.quantity > 0: long += asset.market_value
-            elif asset.quantity < 0: short += asset.market_value
-        return LongShort(long=long, short=short)
+            if asset.quantity > 0: lng += asset.market_value
+            elif asset.quantity < 0: sht += asset.market_value
+        return LongShort(long=lng, short=sht)
 
     @property
     def _quantity_(self):
-        long, short = 0., 0.
+        lng, sht = 0., 0.
         for asset in self.positions.values():
-            if asset.quantity > 0: long += asset.quantity
-            elif asset.quantity < 0: short += asset.quantity
-        return LongShort(long=long, short=short)
+            if asset.quantity > 0: lng += asset.quantity
+            elif asset.quantity < 0: sht += asset.quantity
+        return LongShort(long=lng, short=sht)
 
     @property
     def exposure(self):
@@ -182,6 +182,10 @@ class Portfolio(ZeroBase):
             )
             self._cash_ += trans.total_notional - trans.comm_total
 
+            # Adjust sub-portfolio positions and portfolio level positions
+            cur_pos[ticker].quantity -= unwind_pos
+            self._positions_[ticker].quantity -= unwind_pos
+
             # Adjust new size for trades
             trd_size[ticker] = TargetTrade(asset=asset, quantity=quantity - unwind_pos)
 
@@ -208,25 +212,29 @@ class Portfolio(ZeroBase):
             )
             self._cash_ -= trans.total_notional - trans.comm_total
 
+            # Adjust sub-portfolio positions and portfolio level positions
+            cur_pos[ticker].quantity += quantity
+            self._positions_[ticker].quantity += quantity
+
     def market_value(self, snapshot):
         """
-        Latest market value of all current holdings
         Clean up sub-portfolio and positions that are already unwound
+        Refresh latest market value of all current holdings
 
         Args:
             snapshot: market snapshot
         """
-        mkt_val = 0.
-        for asset in self._positions_.values():
-            price = snapshot[asset.ticker].price
-            if not np.isnan(price): asset.price = snapshot.price
-            mkt_val += asset.market_value
-
         flat_port = [port for port, sub in self._sub_port_.items() if sub.is_flat]
         for port in flat_port: self._sub_port_.pop(port)
 
         flat_pos = [ticker for ticker, pos in self._positions_.items() if pos.quantity == 0]
         for ticker in flat_pos: self._positions_.pop(ticker)
+
+        mkt_val = 0.
+        for asset in self._positions_.values():
+            price = snapshot[asset.ticker].price
+            if not np.isnan(price): asset.price = snapshot.price
+            mkt_val += asset.market_value
 
         return mkt_val
 
