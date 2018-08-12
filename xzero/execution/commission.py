@@ -3,6 +3,7 @@ from abc import ABCMeta, abstractmethod
 from functools import wraps
 from collections import namedtuple
 from xone import utils
+from xzero import ZeroBase
 
 _COMM_SPLIT_ = '__'
 
@@ -52,7 +53,7 @@ def calc_comms(func):
         if transaction.quantity == 0:
             return TransCost(in_bps=0., total_comm=0.)
 
-        total_cost = max(func(self, transaction), self.min_cost)
+        total_cost = round(max(func(self, transaction), self.min_cost), 2)
         total_amt = transaction.quantity * transaction.fill_cost
         return TransCost(
             total_comm=total_cost, in_bps=abs(round(total_cost / total_amt * 1e4, 2)),
@@ -61,7 +62,7 @@ def calc_comms(func):
     return wrapper
 
 
-class Commission:
+class Commission(ZeroBase):
     """
     Commission specification and calculation
 
@@ -72,7 +73,8 @@ class Commission:
 
     def __init__(self, cost, min_cost=0):
 
-        self.cost = round(float(cost) / 10 ** self.rounding, 6)
+        super().__init__()
+        self.cost = round(float(cost) / 10 ** self.__dict__.get('rounding', 0.), 6)
         self.min_cost = round(float(min_cost), 2)
 
     def __init_subclass__(cls, keywords=None, **kwargs):
