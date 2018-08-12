@@ -74,7 +74,7 @@ class Commission(ZeroBase):
     def __init__(self, cost, min_cost=0):
 
         super().__init__()
-        self.cost = round(float(cost) / 10 ** self.__dict__.get('rounding', 0.), 6)
+        self.cost = round(float(cost) / 10 ** self.rounding, 6)
         self.min_cost = round(float(min_cost), 2)
 
     def __init_subclass__(cls, keywords=None, **kwargs):

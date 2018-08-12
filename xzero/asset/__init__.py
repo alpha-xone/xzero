@@ -36,7 +36,7 @@ class Asset(ZeroBase):
         self.quantity = None
         self.lot_size = None
         self.margin_req = None
-        self.comms = commission.Commission(cost=0.)
+        self.comms = commission.comms('dollar__2')
 
         # Borrow / financing / etc.
         self.financing = Financing(
