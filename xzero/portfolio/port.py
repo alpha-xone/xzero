@@ -145,9 +145,9 @@ class Portfolio(ZeroBase):
     def __init__(self, init_cash, trade_on='price', **kwargs):
         """
         Args:
-            init_cash:
-            trade_on:
-            **kwargs:
+            init_cash: initial cash
+            trade_on: field to trade on
+            **kwargs: other kwargs for the class
         """
         super().__init__()
         self.init_cash = init_cash
@@ -162,11 +162,38 @@ class Portfolio(ZeroBase):
         self._sub_pf_ = defaultdict(SubPortfolio)
         self._performance_ = []
         self._tolerance_ = kwargs.pop('tolerance', 5e5)
+        self._cur_dt_ = None
         self.info = kwargs
 
         self._logger_ = logs.get_logger(
             name_or_func=Portfolio, types='stream', level='debug'
         )
+
+    def perf(self):
+        """
+        Current performance
+        """
+        return dict(
+            dt=self._cur_dt_, cash=self._cash_, market_value=self.market_value,
+            margin=self.margin, sub_pf=self.sub_portfolio, pos=self.positions,
+            long_mv=self.long_market_value, short_mv=self.short_market_value,
+        )
+
+    @property
+    def positions(self):
+        """
+        Snapshot of current positions
+        """
+        return {ticker: pos.quantity for ticker, pos in self._positions_.items()}
+
+    @property
+    def sub_portfolio(self):
+        """
+        Snapshot of sub-portfolio
+        """
+        return {pf_name: {
+            ticker: pos.quantity for ticker, pos in sub.positions.items()
+        } for pf_name, sub in self._sub_pf_.items()}
 
     def trade(self, pf_name, target_value, snapshot, assets, weights=None):
         """
@@ -250,7 +277,7 @@ class Portfolio(ZeroBase):
 
         # Exit when there is no more trades
         left_val = np.array([
-            asset.lot_size * qty * snapshot[asset.ticker].price
+            asset.lot_size * qty * snapshot[asset.ticker][self.trade_on]
             for asset, qty in trd_size.values()
         ])
         if abs(left_val).sum() == 0: return
