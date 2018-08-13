@@ -1,5 +1,6 @@
 from xone import logs
 
+from xzero import show_value, show_qty
 from xzero.events import Event, EventType
 from xzero.asset import Asset
 
@@ -33,7 +34,8 @@ class Transaction(Event, event_type=EventType.TRANSACTION):
         self.comm_in_bps = self._comms_.in_bps
 
         self._logger_.info(
-            f'{port_name}:{self.ticker}:qty={quantity}:'
-            f'cost={self.price}:lot={self.lot_size}:notional={self.total_notional}:'
+            f'{port_name}:{self.ticker}:qty={show_qty(quantity)}:'
+            f'cost={show_value(self.price, digit=2)}:lot={show_qty(self.lot_size)}:'
+            f'notional={show_value(self.total_notional)}:'
             f'comms={self.comm_total}:in_bps={self.comm_in_bps}'
         )

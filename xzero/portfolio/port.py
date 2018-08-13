@@ -1,9 +1,10 @@
+import pandas as pd
 import numpy as np
 
 from copy import deepcopy
-from collections import defaultdict, namedtuple
+from collections import defaultdict, namedtuple, OrderedDict
 
-from xzero import ZeroBase
+from xzero import ZeroBase, show_value, show_qty
 from xzero.asset import Asset
 from xzero.events.transaction import Transaction
 
@@ -165,9 +166,7 @@ class Portfolio(ZeroBase):
         self._cur_dt_ = None
         self.info = kwargs
 
-        self._logger_ = logs.get_logger(
-            name_or_func=Portfolio, types='stream', level='debug'
-        )
+        self._logger_ = logs.get_logger(Portfolio, types='stream', level='info')
 
     def perf(self):
         """
@@ -184,16 +183,36 @@ class Portfolio(ZeroBase):
         """
         Snapshot of current positions
         """
-        return {ticker: pos.quantity for ticker, pos in self._positions_.items()}
+        return [dict(
+            ticker=ticker, price=pos.price, quantity=pos.quantity, lot_size=pos.lot_size,
+            market_value=pos.market_value, margin_req=pos.margin_req,
+        ) for ticker, pos in self._positions_.items()]
 
     @property
     def sub_portfolio(self):
         """
         Snapshot of sub-portfolio
         """
-        return {pf_name: {
-            ticker: pos.quantity for ticker, pos in sub.positions.items()
-        } for pf_name, sub in self._sub_pf_.items()}
+        return list(np.array([[
+            dict(
+                pf_name=pf_name, ticker=ticker, price=pos.price, quantity=pos.quantity,
+                lot_size=pos.lot_size, market_value=pos.market_value, margin=sub.margin,
+            ) for ticker, pos in sub.positions.items()
+        ] for pf_name, sub in self._sub_pf_.items()]).flatten())
+
+    @property
+    def frame_pos(self):
+        """
+        Position as DataFrame
+        """
+        return pd.DataFrame(pd.Series(self.positions).apply(OrderedDict).tolist())
+
+    @property
+    def frame_sub_pf(self):
+        """
+        Sub-portfolio as DataFrame
+        """
+        return pd.DataFrame(pd.Series(self.sub_portfolio).apply(OrderedDict).tolist())
 
     def trade(self, pf_name, target_value, snapshot, assets, weights=None):
         """
@@ -242,9 +261,10 @@ class Portfolio(ZeroBase):
                     (target_value * weights[ticker] - cur_val) / asset.lot_size / price
                 ))
                 self._logger_.debug(
-                    f'{ticker}:target_value={target_value * weights[ticker]}:'
-                    f'current_value={cur_val}:quantity={trd_size[ticker][1]}:'
-                    f'order_value={trd_size[ticker][1] * asset.lot_size * price}'
+                    f'{ticker}:target_value={show_value(target_value * weights[ticker])}:'
+                    f'current_value={show_value(cur_val)}:'
+                    f'quantity={show_qty(trd_size[ticker][1])}:'
+                    f'order_value={show_value(trd_size[ticker][1] * asset.lot_size * price)}'
                 )
 
         # TODO: use margin requirements to adjust cash
@@ -271,8 +291,8 @@ class Portfolio(ZeroBase):
             # Adjust new size for trades
             trd_size[ticker] = TargetTrade(asset=asset, quantity=quantity - unwind_pos)
             self._logger_.debug(
-                f'{pf_name}:{ticker}:qty={quantity}:'
-                f'unwind={unwind_pos}:new_qty={quantity - unwind_pos}'
+                f'{pf_name}:{ticker}:qty={show_qty(quantity)}:'
+                f'unwind={show_qty(unwind_pos)}:new_qty={show_qty(quantity - unwind_pos)}'
             )
 
         # Exit when there is no more trades
@@ -311,16 +331,17 @@ class Portfolio(ZeroBase):
             port_name=pf_name, asset=asset, snapshot=snapshot, quantity=quantity
         )
 
-        cash_info = f'{pf_name}:{ticker}:cash={round(self._cash_, 2)}:' \
-                    f'notional={round(trans.total_notional, 2)}:comms={trans.comm_total}'
+        cash_info = f'{pf_name}:{ticker}:cash={show_value(self._cash_)}:' \
+                    f'notional={show_value(trans.total_notional)}:' \
+                    f'comms={show_value(trans.comm_total)}'
         self._cash_ -= round(trans.total_notional + trans.comm_total, 2)
         self._commission_[ticker] += round(trans.comm_total, 2)
-        self._logger_.debug(f'{cash_info}:after={round(self._cash_, 2)}')
+        self._logger_.debug(f'{cash_info}:after={show_value(self._cash_)}')
 
         cur_qty = self._positions_[ticker].quantity if ticker in self._positions_ else 0
-        pos_info = f'{pf_name}:{ticker}:quantity={cur_qty}:chg={quantity}'
+        pos_info = f'{pf_name}:{ticker}:quantity={show_qty(cur_qty)}:chg={show_qty(quantity)}'
         self._update_position_(pf_name=pf_name, asset=asset, quantity=quantity)
-        self._logger_.debug(f'{pos_info}:after={self._positions_[ticker].quantity}')
+        self._logger_.debug(f'{pos_info}:after={show_qty(self._positions_[ticker].quantity)}')
 
     def _update_position_(self, pf_name, asset: Asset, quantity):
         """

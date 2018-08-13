@@ -4,6 +4,20 @@ import json
 from xone import utils, files
 
 
+def show_value(value, digit=1):
+    """
+    Use thousand seperator to display values
+    """
+    return utils.format_float(digit=digit)(value)
+
+
+def show_qty(value):
+    """
+    Use thousand seperator to display quantities
+    """
+    return utils.format_float(digit=0)(value)
+
+
 class ZeroBase(object):
     """
     Base class for this platform
