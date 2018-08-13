@@ -1,5 +1,6 @@
 import numpy as np
 
+from copy import deepcopy
 from collections import defaultdict, namedtuple
 
 from xzero import ZeroBase
@@ -113,13 +114,32 @@ class Portfolio(ZeroBase):
         >>> snapshot['GOOG'] = pd.Series({'price': 1220})
         >>> snapshot['FB'] = pd.Series({'price': 185})
         >>>
+        >>> weights = {'AAPL': 1, 'GOOG': 1, 'FB': -1}
+        >>>
         >>> p = Portfolio(init_cash=1e6)
         >>>
-        >>> p.trade('tech', 1e6, snapshot, [a1, a2, a3], {'AAPL': 1, 'GOOG': 1, 'FB': -1})
+        >>> p.trade('tech', 1e6, snapshot, [a1, a2, a3], weights)
         >>>
-        >>> assert p.market_value(snapshot) == 492500
+        >>> assert p.mark_to_market(snapshot) == 492500
         >>> assert p.total_costs == 298.3
         >>> assert round(p.nav * p.init_cash / 100 + p.total_costs, 0) == 1e6
+        >>>
+        >>> snapshot['AAPL'] = pd.Series(dict(price=220))
+        >>> assert p.mark_to_market(snapshot) == 516500
+        >>> assert p.nav == 102.3702
+        >>>
+        >>> snapshot['FB'] = pd.Series(dict(price=190))
+        >>> assert p.mark_to_market(snapshot) == 503000
+        >>> assert p.nav == 101.0202
+        >>>
+        >>> p.trade('tech', -5e5, snapshot, [a1, a2, a3], weights)
+        >>> assert p.total_costs == 750.7
+        >>> assert p.nav == 100.9749
+        >>>
+        >>> sub_port = p.__dict__['_sub_port_']['tech']
+        >>> assert sub_port.positions['AAPL'].quantity == -11
+        >>> assert sub_port.positions['GOOG'].quantity == -2
+        >>> assert sub_port.positions['FB'].quantity == 13
     """
     def __init__(self, init_cash, trade_on='price', **kwargs):
 
@@ -137,7 +157,9 @@ class Portfolio(ZeroBase):
         self._performance_ = []
         self._tolerance_ = kwargs.pop('tolerance', 5e5)
 
-        self._logger_ = logs.get_logger(name_or_func=Portfolio, types='stream')
+        self._logger_ = logs.get_logger(
+            name_or_func=Portfolio, types='stream', level='debug'
+        )
 
     def trade(self, port_name, target_value, snapshot, assets, weights=None):
         """
@@ -185,13 +207,18 @@ class Portfolio(ZeroBase):
                 trd_size[ticker] = TargetTrade(asset=asset, quantity=round(
                     (target_value * weights[ticker] - cur_val) / asset.lot_size / price
                 ))
+                self._logger_.debug(
+                    f'{ticker}:target_value={target_value * weights[ticker]}:'
+                    f'current_value={cur_val}:quantity={trd_size[ticker][1]}:'
+                    f'order_value={trd_size[ticker][1] * asset.lot_size * price}'
+                )
 
         # TODO: use margin requirements to adjust cash
         #       1) add back margins from the unwound portion
         #       2) use margins as cash constrains for trade initiations
         #       3) track margin changes every day
 
-        # Check unwind positions
+        # Unwind positions if direction is different
         for ticker, (asset, quantity) in trd_size.items():
             # Existing positions
             if asset.ticker not in cur_port.positions: cur_asset_pos = 0
@@ -200,21 +227,19 @@ class Portfolio(ZeroBase):
             # Positions to unwind
             unwind_pos = 0
             if quantity * cur_asset_pos < 0:
-                unwind_pos = np.sign(cur_asset_pos) * min(quantity, cur_asset_pos)
+                unwind_pos = np.sign(-cur_asset_pos) * min(abs(quantity), abs(cur_asset_pos))
             if unwind_pos == 0: continue
 
-            # Transaction details
-            trans = Transaction(
+            self._execute_order_(
                 port_name=port_name, asset=asset, snapshot=snapshot, quantity=unwind_pos
             )
-            self._cash_ += trans.total_notional - trans.comm_total
-            self._commission_[ticker] += trans.comm_total
-
-            # Adjust sub-portfolio positions and portfolio level positions
-            self.update_position(port_name=port_name, asset=asset, chg_qty=-unwind_pos)
 
             # Adjust new size for trades
             trd_size[ticker] = TargetTrade(asset=asset, quantity=quantity - unwind_pos)
+            self._logger_.debug(
+                f'{port_name}:{ticker}:qty={quantity}:'
+                f'unwind={unwind_pos}:new_qty={quantity - unwind_pos}'
+            )
 
         # Exit when there is no more trades
         left_val = np.array([
@@ -233,57 +258,110 @@ class Portfolio(ZeroBase):
         for ticker, (asset, quantity) in trd_size.items():
             if scale > 1.: quantity = round(quantity / scale, 0)
             if quantity == 0: continue
-
-            # Transaction details
-            trans = Transaction(
-                port_name=port_name, asset=asset, snapshot=snapshot, quantity=quantity
+            self._execute_order_(
+                port_name=port_name, asset=asset, quantity=quantity, snapshot=snapshot
             )
-            self._cash_ -= trans.total_notional + trans.comm_total
-            self._commission_[ticker] += trans.comm_total
 
-            # Adjust sub-portfolio positions and portfolio level positions
-            self.update_position(port_name=port_name, asset=asset, chg_qty=quantity)
+    def _execute_order_(self, port_name, asset: Asset, quantity, snapshot):
+        """
+        Execute given order and adjust cash, commissions and etc.
 
-    def update_position(self, port_name, asset: Asset, chg_qty):
+        Args:
+            port_name: sub-portfolio name
+            asset: asset
+            quantity: order quantity
+            snapshot: market snapshot
+        """
+        ticker = asset.ticker
+        trans = Transaction(
+            port_name=port_name, asset=asset, snapshot=snapshot, quantity=quantity
+        )
+
+        cash_info = f'{port_name}:{ticker}:cash={round(self._cash_, 2)}:' \
+                    f'notional={round(trans.total_notional, 2)}:comms={trans.comm_total}'
+        self._cash_ -= round(trans.total_notional + trans.comm_total, 2)
+        self._commission_[ticker] += round(trans.comm_total, 2)
+        self._logger_.debug(f'{cash_info}:after={round(self._cash_, 2)}')
+
+        cur_qty = self._positions_[ticker].quantity if ticker in self._positions_ else 0
+        pos_info = f'{port_name}:{ticker}:quantity={cur_qty}:chg={quantity}'
+        self._update_position_(port_name=port_name, asset=asset, quantity=quantity)
+        self._logger_.debug(f'{pos_info}:after={self._positions_[ticker].quantity}')
+
+    def _update_position_(self, port_name, asset: Asset, quantity):
         """
         Update positions of sub-portfolio and self positions together
 
         Args:
             port_name: sub-portfolio name
             asset: asset
-            chg_qty: change of quantities, - / +
+            quantity: change of quantities, - / +
         """
+        ticker = asset.ticker
         if port_name not in self._sub_port_:
             self._sub_port_[port_name] = SubPortfolio(port_name=port_name)
 
         cur_port = self._sub_port_[port_name]
-        if asset.ticker not in cur_port.positions:
-            cur_port.positions[asset.ticker] = asset
-            cur_port.positions[asset.ticker].quantity = chg_qty
+        if ticker not in cur_port.positions:
+            cur_port.positions[ticker] = asset
+            cur_port.positions[ticker].quantity = quantity
         else:
-            cur_port.positions[asset.ticker].quantity += chg_qty
+            cur_port.positions[ticker].quantity += quantity
 
         cur_pos = self._positions_
-        if asset.ticker not in cur_pos:
-            cur_pos[asset.ticker] = asset
-            cur_pos[asset.ticker].quantity = chg_qty
+        if ticker not in cur_pos:
+            cur_pos[ticker] = deepcopy(asset)
+            cur_pos[ticker].quantity = quantity
         else:
-            cur_pos[asset.ticker].quantity += chg_qty
+            cur_pos[ticker].quantity += quantity
 
     @property
     def nav(self):
         """
         Current total market values
         """
-        return round((self._cash_ + self.market_value()) / self.init_cash * 100, 4)
+        return round((self._cash_ + self.market_value) / self.init_cash * 100, 4)
 
-    def market_value(self, snapshot=None):
+    @property
+    def _mkt_val_(self):
+        """
+        Market values for all underlying assets as list
+        """
+        return np.array([asset.market_value for asset in self._positions_.values()])
+
+    @property
+    def long_market_value(self):
+        """
+        Long market value
+        """
+        mkt_val = self._mkt_val_
+        return mkt_val[mkt_val > 0].sum()
+
+    @property
+    def short_market_value(self):
+        """
+        Short market value
+        """
+        mkt_val = self._mkt_val_
+        return mkt_val[mkt_val < 0].sum()
+
+    @property
+    def market_value(self):
+        """
+        Net market value of all current positions
+        """
+        return self._mkt_val_.sum()
+
+    def mark_to_market(self, snapshot=None):
         """
         Clean up sub-portfolio and positions that are already unwound
         Refresh latest market value of all current holdings
 
         Args:
             snapshot: market snapshot
+
+        Returns:
+            Net market value
         """
         flat_port = [port for port, sub in self._sub_port_.items() if sub.is_flat]
         for port in flat_port: self._sub_port_.pop(port)
@@ -363,4 +441,4 @@ if __name__ == '__main__':
         python -m xzero.portfolio.port all
     """
     import xdoctest
-    xdoctest.doctest_module(modpath_or_name=__file__)
+    xdoctest.doctest_module(__file__)
