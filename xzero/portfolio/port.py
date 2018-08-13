@@ -30,20 +30,16 @@ class SubPortfolio(ZeroBase):
         """
         Long and short exposures
         """
-        lng, sht = 0., 0.
-        for asset in self.positions.values():
-            if asset.quantity > 0: lng += asset.market_value
-            elif asset.quantity < 0: sht += asset.market_value
-        return LongShort(long=lng, short=sht)
+        mkt_val = np.array([asset.market_value for asset in self.positions.values()])
+        return LongShort(
+            long=mkt_val[mkt_val > 0].sum(), short=abs(mkt_val[mkt_val < 0]).sum()
+        )
 
     @property
     def _quantity_(self):
 
-        lng, sht = 0., 0.
-        for asset in self.positions.values():
-            if asset.quantity > 0: lng += asset.quantity
-            elif asset.quantity < 0: sht += asset.quantity
-        return LongShort(long=lng, short=sht)
+        qty = np.array([asset.quantity for asset in self.positions.values()])
+        return LongShort(long=qty[qty > 0].sum(), short=abs(qty[qty < 0]).sum())
 
     @property
     def exposure(self):
@@ -78,15 +74,17 @@ class SubPortfolio(ZeroBase):
         """
         Assuming charged as max(long, short)
         """
-        long, short = 0., 0.
-        for asset in self.positions.values():
-            if asset.quantity == 0: continue
-            if asset.quantity != 0 and asset.margin_req == 0:
-                self._logger_.warning(f'Margin requirment for {asset.ticker} is 0.')
-                continue
-            if asset.quantity > 0: long += asset.market_value * asset.margin_req
-            elif asset.quantity < 0: short += asset.market_value * asset.margin_req
-        return max(long, abs(short))
+        m = np.array([asset.market_value for asset in self.positions.values()])
+        r = np.array([asset.margin_req for asset in self.positions.values()])
+
+        if r.min() == 0:
+            zero_req = [
+                asset.ticker for asset in self.positions.values()
+                if asset.margin_req == 0
+            ]
+            self._logger_.warning(f'margin requirements for tickers {zero_req} are 0')
+
+        return max((m[m > 0] * r[m > 0]).sum(), abs(m[m < 0] * r[m < 0]).sum())
 
     @property
     def is_flat(self):
@@ -123,6 +121,7 @@ class Portfolio(ZeroBase):
         >>> assert p.mark_to_market(snapshot) == 492500
         >>> assert p.total_costs == 298.3
         >>> assert round(p.nav * p.init_cash / 100 + p.total_costs, 0) == 1e6
+        >>> assert p.margin == 145800
         >>>
         >>> snapshot['AAPL'] = pd.Series(dict(price=220))
         >>> assert p.mark_to_market(snapshot) == 516500
@@ -140,6 +139,8 @@ class Portfolio(ZeroBase):
         >>> assert sub_port.positions['AAPL'].quantity == -11
         >>> assert sub_port.positions['GOOG'].quantity == -2
         >>> assert sub_port.positions['FB'].quantity == 13
+        >>>
+        >>> assert p.margin == 69900
     """
     def __init__(self, init_cash, trade_on='price', **kwargs):
 
