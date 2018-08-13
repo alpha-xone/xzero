@@ -17,10 +17,10 @@ class SubPortfolio(ZeroBase):
     """
     Sub-Portfolio to hold long / short pairs or a group of assets
     """
-    def __init__(self, port_name):
+    def __init__(self, pf_name):
 
         super().__init__()
-        self.portfolio_name = port_name
+        self.pf_name = pf_name
         self.positions = defaultdict(Asset)
 
         self._logger_ = logs.get_logger(SubPortfolio, types='stream')
@@ -135,7 +135,7 @@ class Portfolio(ZeroBase):
         >>> assert p.total_costs == 750.7
         >>> assert p.nav == 100.9749
         >>>
-        >>> sub_port = p.__dict__['_sub_port_']['tech']
+        >>> sub_port = p.__dict__['_sub_pf_']['tech']
         >>> assert sub_port.positions['AAPL'].quantity == -11
         >>> assert sub_port.positions['GOOG'].quantity == -2
         >>> assert sub_port.positions['FB'].quantity == 13
@@ -143,7 +143,12 @@ class Portfolio(ZeroBase):
         >>> assert p.margin == 69900
     """
     def __init__(self, init_cash, trade_on='price', **kwargs):
-
+        """
+        Args:
+            init_cash:
+            trade_on:
+            **kwargs:
+        """
         super().__init__()
         self.init_cash = init_cash
         self.trade_on = trade_on
@@ -154,33 +159,34 @@ class Portfolio(ZeroBase):
         self._market_value_ = 0.
         self._margin_ = 0.
         self._positions_ = defaultdict(Asset)
-        self._sub_port_ = defaultdict(SubPortfolio)
+        self._sub_pf_ = defaultdict(SubPortfolio)
         self._performance_ = []
         self._tolerance_ = kwargs.pop('tolerance', 5e5)
+        self.info = kwargs
 
         self._logger_ = logs.get_logger(
             name_or_func=Portfolio, types='stream', level='debug'
         )
 
-    def trade(self, port_name, target_value, snapshot, assets, weights=None):
+    def trade(self, pf_name, target_value, snapshot, assets, weights=None):
         """
         Trade portfolio according (including taking risks and unwinds)
 
         Args:
-            port_name: sub-portfolio name
+            pf_name: sub-portfolio name
             target_value: target value - accepts both positive and negative
             snapshot: market snapshot
             assets: list of assets
             weights: weights of each component (dict)
         """
-        cur_port = self._sub_port_.get(port_name, SubPortfolio(port_name=port_name))
-        cur_pos = cur_port.positions
-        net_chg = abs(cur_port.exposure - target_value)
+        cur_pf = self._sub_pf_.get(pf_name, SubPortfolio(pf_name=pf_name))
+        cur_pos = cur_pf.positions
+        net_chg = abs(cur_pf.exposure - target_value)
         weights = proper_weights(weights=weights, assets=assets)
 
         if (net_chg < self._tolerance_) and (target_value != 0):
             self._logger_.info(
-                f'Skip trading sub-portfolio [{port_name}] '
+                f'Skip trading sub-portfolio [{pf_name}] '
                 f'cause delta change is too small: {net_chg}'
             )
 
@@ -222,8 +228,8 @@ class Portfolio(ZeroBase):
         # Unwind positions if direction is different
         for ticker, (asset, quantity) in trd_size.items():
             # Existing positions
-            if asset.ticker not in cur_port.positions: cur_asset_pos = 0
-            else: cur_asset_pos = cur_port.positions[asset.ticker].quantity
+            if asset.ticker not in cur_pf.positions: cur_asset_pos = 0
+            else: cur_asset_pos = cur_pf.positions[asset.ticker].quantity
 
             # Positions to unwind
             unwind_pos = 0
@@ -232,13 +238,13 @@ class Portfolio(ZeroBase):
             if unwind_pos == 0: continue
 
             self._execute_order_(
-                port_name=port_name, asset=asset, snapshot=snapshot, quantity=unwind_pos
+                pf_name=pf_name, asset=asset, snapshot=snapshot, quantity=unwind_pos
             )
 
             # Adjust new size for trades
             trd_size[ticker] = TargetTrade(asset=asset, quantity=quantity - unwind_pos)
             self._logger_.debug(
-                f'{port_name}:{ticker}:qty={quantity}:'
+                f'{pf_name}:{ticker}:qty={quantity}:'
                 f'unwind={unwind_pos}:new_qty={quantity - unwind_pos}'
             )
 
@@ -260,54 +266,54 @@ class Portfolio(ZeroBase):
             if scale > 1.: quantity = round(quantity / scale, 0)
             if quantity == 0: continue
             self._execute_order_(
-                port_name=port_name, asset=asset, quantity=quantity, snapshot=snapshot
+                pf_name=pf_name, asset=asset, quantity=quantity, snapshot=snapshot
             )
 
-    def _execute_order_(self, port_name, asset: Asset, quantity, snapshot):
+    def _execute_order_(self, pf_name, asset: Asset, quantity, snapshot):
         """
         Execute given order and adjust cash, commissions and etc.
 
         Args:
-            port_name: sub-portfolio name
+            pf_name: sub-portfolio name
             asset: asset
             quantity: order quantity
             snapshot: market snapshot
         """
         ticker = asset.ticker
         trans = Transaction(
-            port_name=port_name, asset=asset, snapshot=snapshot, quantity=quantity
+            port_name=pf_name, asset=asset, snapshot=snapshot, quantity=quantity
         )
 
-        cash_info = f'{port_name}:{ticker}:cash={round(self._cash_, 2)}:' \
+        cash_info = f'{pf_name}:{ticker}:cash={round(self._cash_, 2)}:' \
                     f'notional={round(trans.total_notional, 2)}:comms={trans.comm_total}'
         self._cash_ -= round(trans.total_notional + trans.comm_total, 2)
         self._commission_[ticker] += round(trans.comm_total, 2)
         self._logger_.debug(f'{cash_info}:after={round(self._cash_, 2)}')
 
         cur_qty = self._positions_[ticker].quantity if ticker in self._positions_ else 0
-        pos_info = f'{port_name}:{ticker}:quantity={cur_qty}:chg={quantity}'
-        self._update_position_(port_name=port_name, asset=asset, quantity=quantity)
+        pos_info = f'{pf_name}:{ticker}:quantity={cur_qty}:chg={quantity}'
+        self._update_position_(pf_name=pf_name, asset=asset, quantity=quantity)
         self._logger_.debug(f'{pos_info}:after={self._positions_[ticker].quantity}')
 
-    def _update_position_(self, port_name, asset: Asset, quantity):
+    def _update_position_(self, pf_name, asset: Asset, quantity):
         """
         Update positions of sub-portfolio and self positions together
 
         Args:
-            port_name: sub-portfolio name
+            pf_name: sub-portfolio name
             asset: asset
             quantity: change of quantities, - / +
         """
         ticker = asset.ticker
-        if port_name not in self._sub_port_:
-            self._sub_port_[port_name] = SubPortfolio(port_name=port_name)
+        if pf_name not in self._sub_pf_:
+            self._sub_pf_[pf_name] = SubPortfolio(pf_name=pf_name)
 
-        cur_port = self._sub_port_[port_name]
-        if ticker not in cur_port.positions:
-            cur_port.positions[ticker] = asset
-            cur_port.positions[ticker].quantity = quantity
+        cur_pf = self._sub_pf_[pf_name]
+        if ticker not in cur_pf.positions:
+            cur_pf.positions[ticker] = asset
+            cur_pf.positions[ticker].quantity = quantity
         else:
-            cur_port.positions[ticker].quantity += quantity
+            cur_pf.positions[ticker].quantity += quantity
 
         cur_pos = self._positions_
         if ticker not in cur_pos:
@@ -364,8 +370,8 @@ class Portfolio(ZeroBase):
         Returns:
             Net market value
         """
-        flat_port = [port for port, sub in self._sub_port_.items() if sub.is_flat]
-        for port in flat_port: self._sub_port_.pop(port)
+        flat_pf = [port for port, sub in self._sub_pf_.items() if sub.is_flat]
+        for pf in flat_pf: self._sub_pf_.pop(pf)
 
         flat_pos = [ticker for ticker, pos in self._positions_.items() if pos.quantity == 0]
         for ticker in flat_pos: self._positions_.pop(ticker)
@@ -391,7 +397,7 @@ class Portfolio(ZeroBase):
         """
         Latest margin for all sub-portfolio
         """
-        return np.array([port.margin for port in self._sub_port_.values()]).sum()
+        return np.array([pf.margin for pf in self._sub_pf_.values()]).sum()
 
 
 def proper_weights(assets, weights=None):
