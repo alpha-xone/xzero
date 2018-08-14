@@ -143,16 +143,23 @@ class Portfolio(ZeroBase):
         >>>
         >>> assert p.margin == 69900
     """
-    def __init__(self, init_cash, trade_on='price', **kwargs):
+    def __init__(self, init_cash, trade_on='price', mark_on='price', **kwargs):
         """
         Args:
             init_cash: initial cash
             trade_on: field to trade on
+            mark_on: price field for mark-to-market purpose
             **kwargs: other kwargs for the class
         """
         super().__init__()
         self.init_cash = init_cash
         self.trade_on = trade_on
+        self.mark_on = mark_on
+
+        if trade_on in ['bid_ask', 'ask_bid']:
+            self._buy_on_, self._sell_on_ = 'ask', 'bid'
+        else:
+            self._buy_on_, self._sell_on_ = trade_on, trade_on
 
         # Internal values to track positions and performance
         self._cash_ = init_cash
@@ -237,8 +244,9 @@ class Portfolio(ZeroBase):
             )
 
         for asset in assets:
-            price = snapshot[asset.ticker][self.trade_on]
-            if np.isnan(price) and (weights.get(asset.ticker, 0) != 0):
+            buy_px = snapshot[asset.ticker][self._buy_on_]
+            sell_px = snapshot[asset.ticker][self._sell_on_]
+            if (np.isnan(buy_px) or np.isnan(sell_px)) and (weights.get(asset.ticker, 0) != 0):
                 self._logger_.info(f'Cannot trade {asset.ticker} due to price availability')
                 return
 
@@ -254,7 +262,7 @@ class Portfolio(ZeroBase):
             # Initiate new trades
             for asset in assets:
                 ticker = asset.ticker
-                price = snapshot[ticker][self.trade_on]
+                price = snapshot[ticker][self.mark_on]
                 cur_qty = cur_pos[ticker].quantity if ticker in cur_pos else 0
                 cur_val = cur_qty * price * asset.lot_size
                 trd_size[ticker] = TargetTrade(asset=asset, quantity=round(
@@ -297,7 +305,7 @@ class Portfolio(ZeroBase):
 
         # Exit when there is no more trades
         left_val = np.array([
-            asset.lot_size * qty * snapshot[asset.ticker][self.trade_on]
+            asset.lot_size * qty * snapshot[asset.ticker][self.mark_on]
             for asset, qty in trd_size.values()
         ])
         if abs(left_val).sum() == 0: return
@@ -328,7 +336,8 @@ class Portfolio(ZeroBase):
         """
         ticker = asset.ticker
         trans = Transaction(
-            port_name=pf_name, asset=asset, snapshot=snapshot, quantity=quantity
+            port_name=pf_name, asset=asset, snapshot=snapshot, quantity=quantity,
+            trade_on=self._buy_on_ if quantity > 0 else self._sell_on_,
         )
 
         cash_info = f'{pf_name}:{ticker}:cash={show_value(self._cash_)}:' \
@@ -427,7 +436,7 @@ class Portfolio(ZeroBase):
         mkt_val = 0.
         for asset in self._positions_.values():
             if snapshot is not None:
-                price = snapshot[asset.ticker][self.trade_on]
+                price = snapshot[asset.ticker][self.mark_on]
                 if not np.isnan(price): asset.price = price
             mkt_val += asset.market_value
 

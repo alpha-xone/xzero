@@ -13,19 +13,20 @@ class Transaction(Event, event_type=EventType.TRANSACTION):
     """
     Transaction details
     """
-    def __init__(self, port_name, asset: Asset, snapshot, quantity):
+    def __init__(self, port_name, asset: Asset, snapshot, quantity, trade_on):
         """
         Args:
             port_name: portfolio name
             asset: asset
             snapshot: market snapshot
             quantity: quantity, can be + / -
+            trade_on: price field to trade
         """
         super().__init__()
 
         self.port_name = port_name
         self.ticker = asset.ticker
-        self.price = snapshot[self.ticker].price
+        self.price = snapshot[self.ticker][trade_on]
         self.lot_size = asset.lot_size
         self.quantity = quantity
 
