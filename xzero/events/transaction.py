@@ -13,10 +13,15 @@ class Transaction(Event, event_type=EventType.TRANSACTION):
     """
     Transaction details
     """
-    def __init__(self, port_name, asset, snapshot, quantity):
-
+    def __init__(self, port_name, asset: Asset, snapshot, quantity):
+        """
+        Args:
+            port_name: portfolio name
+            asset: asset
+            snapshot: market snapshot
+            quantity: quantity, can be + / -
+        """
         super().__init__()
-        assert isinstance(asset, Asset)
 
         self.port_name = port_name
         self.ticker = asset.ticker
