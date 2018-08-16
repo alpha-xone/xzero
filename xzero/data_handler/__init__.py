@@ -2,6 +2,7 @@ from collections import defaultdict
 
 from xone import utils
 from xzero import ZeroBase
+from xzero.events import Event
 from xzero.events.market import MarketEvent
 
 
@@ -33,7 +34,7 @@ class MarketSnapshot(ZeroBase):
         self.snap = defaultdict(MarketSnapshotRow)
         self.timestamp = None
 
-    def update(self, event):
+    def update(self, event: Event):
         """
         Update snapshot according to latest market event
 
@@ -42,3 +43,7 @@ class MarketSnapshot(ZeroBase):
         """
         if not isinstance(event, MarketEvent): return
         self.snap = event.data
+
+    def __getitem__(self, item):
+
+        return self.snap.get(item, MarketSnapshotRow())

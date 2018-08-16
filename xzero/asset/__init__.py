@@ -44,6 +44,8 @@ class Asset(ZeroBase):
             financing_cost=kwargs.pop('financing_cost', 0.)
         )
 
+        self.info = dict()
+
     def __init_subclass__(cls, asset_type=None, **kwargs):
 
         cls.asset_type = asset_type
