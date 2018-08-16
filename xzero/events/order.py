@@ -1,6 +1,8 @@
 import pandas as pd
 
 from abc import ABCMeta
+
+from xzero.asset import Asset
 from xzero.events import Event, EventType
 
 
@@ -10,39 +12,44 @@ class ExecutionEvent(Event, event_type=EventType.EXECUTION):
     """
     __metaclass__ = ABCMeta
 
-    def __init__(self, strategy, ticker, timestamp, quantity, **kwargs):
+    def __init__(self, timestamp, strategy, asset: Asset, quantity, **kwargs):
         """
         Args:
-            strategy: order strategy - helps grouping pairs / sub-strategies together
-            ticker: ticker name
             timestamp: timestamp of event
+            strategy: order strategy - helps grouping pairs / sub-strategies together
+            asset: traded asset
             quantity: quantity to trade or filled
             **kwargs: other infomation
 
         Examples:
-            >>> info_dict = dict(strategy='Growth', ticker='AAPL', timestamp='2018-07-05', quantity=100)
-            >>> ex = ExecutionEvent.from_dict(**info_dict)
-            >>> res = 'ExecutionEvent(strategy=Growth, ticker=AAPL, '
-            >>> res += 'timestamp=2018-07-05 00:00:00, quantity=100, side=1)'
-            >>> assert str(ex) == res
+            >>> from xzero.asset import Equity
             >>>
-            >>> signal = SignalEvent(**info_dict)
-            >>> assert str(signal) == res.replace('ExecutionEvent', 'SignalEvent')
+            >>> eqy = Equity(ticker='AAPL', price=200, lot_size=100)
+            >>> info_dict = dict(
+            >>>     timestamp='2018-07-05', strategy='Growth', asset=eqy, quantity=100
+            >>> )
+            >>> ex = ExecutionEvent.from_dict(**info_dict)
+            >>> res = 'ExecutionEvent(timestamp=2018-07-05 00:00:00, strategy=Growth, '
+            >>> res += 'asset=Equity(ticker=AAPL, price=200, quantity=0, lot_size=100, '
+            >>> res += 'margin_req=0.15, comms=PerDollar(cost=0.0002, min_cost=0.0), '
+            >>> res += 'financing=Financing(borrow_cost=0.0, financing_cost=0.0), '
+            >>> res += 'tick_size=0.01), quantity=100, side=1)'
+            >>> assert str(ex) == res
             >>>
             >>> fill = FillEvent(fill_cost=185.4, **info_dict)
             >>> res = res[:-1] + ', fill_cost=185.4)'
             >>> assert str(fill) == res.replace('ExecutionEvent', 'FillEvent')
         """
         super().__init__()
-        self.strategy = strategy
-        self.ticker = ticker
         self.timestamp = pd.Timestamp(timestamp)
+        self.strategy = strategy
+        self.asset = asset
         self.quantity = int(quantity)
         self.side = 1 if self.quantity > 0 else -1
         self.info = kwargs
         if self.quantity == 0: raise ValueError(
             f'[{self.__class__.__name__}] Invalid quantity of 0 '
-            f'for {strategy} / {ticker} / {timestamp}'
+            f'({strategy} / {asset.ticker} / {timestamp})'
         )
 
     def __init_subclass__(cls, event_type=None, **kwargs):
@@ -56,12 +63,6 @@ class ExecutionEvent(Event, event_type=EventType.EXECUTION):
         super().__init__(self=cls, **kwargs)
 
 
-class SignalEvent(ExecutionEvent, event_type=EventType.SIGNAL):
-    """
-    Signal details
-    """
-
-
 class OrderEvent(ExecutionEvent, event_type=EventType.ORDER):
     """
     Order details
@@ -72,15 +73,21 @@ class MarketOrderEvent(OrderEvent, event_type=EventType.MKT_ORDER):
     """
     Market orders
     """
+    def __init__(self, timestamp, strategy, asset: Asset, quantity, limit=None, **kwargs):
+        super().__init__(
+            timestamp=timestamp, strategy=strategy, asset=asset, quantity=quantity,
+        )
+        self.limit = round(float(limit), 2) if isinstance(limit, float) else None
+        self.info = kwargs
 
 
 class LimitOrderEvent(OrderEvent, event_type=EventType.LMT_ORDER):
     """
     Limit orders
     """
-    def __init__(self, strategy, ticker, timestamp, quantity, limit, **kwargs):
+    def __init__(self, timestamp, strategy, asset: Asset, quantity, limit, **kwargs):
         super().__init__(
-            strategy=strategy, ticker=ticker, timestamp=timestamp, quantity=quantity
+            timestamp=timestamp, strategy=strategy, asset=asset, quantity=quantity,
         )
         self.limit = round(float(limit), 2)
         self.info = kwargs
@@ -90,11 +97,11 @@ class FillEvent(ExecutionEvent, event_type=EventType.FILL):
     """
     Order fill details
     """
-    def __init__(self, strategy, ticker, timestamp, quantity, fill_cost, **kwargs):
+    def __init__(self, timestamp, strategy, asset: Asset, quantity, fill_cost, **kwargs):
         super().__init__(
-            strategy=strategy, ticker=ticker, timestamp=timestamp, quantity=quantity
+            timestamp=timestamp, strategy=strategy, asset=asset, quantity=quantity,
         )
-        self.fill_cost = round(float(fill_cost), 6)
+        self.fill_cost = round(float(fill_cost), 4)
         self.info = kwargs
 
 
