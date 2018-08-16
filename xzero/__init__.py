@@ -1,5 +1,7 @@
 __version__ = '0.0.1'
 
+from abc import ABCMeta
+
 import json
 from xone import utils, files
 
@@ -24,7 +26,9 @@ class ZeroBase(object):
 
     Provides some basic functionalities for all sub-classes
     """
-    _preserved_ = ['info']
+    __metaclass__ = ABCMeta
+
+    _preserved_ = ['info', 'events_queue']
 
     def __init__(self, **kwargs): pass
 
