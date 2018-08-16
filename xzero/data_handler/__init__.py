@@ -46,9 +46,10 @@ class MarketSnapshot(ZeroBase):
     """
     Stores market snapshots
     """
-    def __init__(self):
+    def __init__(self, ticker_field='ticker'):
 
         super().__init__()
+        self.ticker_field = ticker_field
         self.timestamp = None
         self.snapshot = defaultdict(MarketSnapshotRow)
 
@@ -78,8 +79,8 @@ class MarketSnapshot(ZeroBase):
         elif isinstance(event.data, pd.DataFrame):
             for _, snap in event.data.iteritems():
                 if snap.ticker not in self.snapshot:
-                    self.snapshot[snap.ticker] = MarketSnapshotRow(
-                        event=MarketEvent(timestamp=_, data=snap)
-                    )
+                    self.snapshot[snap.ticker] = MarketSnapshotRow(MarketEvent(
+                        timestamp=_, data=snap, ticker_field=self.ticker_field
+                    ))
                 else:
                     self.snapshot[snap.ticker].snapshot.update(**snap.to_dict())
